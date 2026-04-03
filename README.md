@@ -44,8 +44,16 @@ ANTHROPIC_API_KEY=your_key_here
 You will need an account on [Claude platform](https://platform.claude.com/) with some token credits.
 
 ### Gmail MCP server
-
-Follow the Google Cloud setup steps to obtain OAuth credentials, then configure and run the Gmail MCP server locally before starting the script. See Phase 2 setup instructions (TODO).
+#### Set Up Google Cloud Project
+- Go to the [Google Cloud Console](https://console.cloud.google.com/).
+- Create a new project.
+- Navigate to "APIs & Services" > "Library" and enable the Gmail API.
+- Generate OAuth Credentials
+- Go to "APIs & Services" > "Credentials".
+- Click "Create Credentials" > "OAuth client ID".
+- Choose "Desktop application" (or Web application) and download the credentials.json file.
+- install the mcp server for example by using `pip install mcp-gmail`
+- once installed you should be able to run the mcp server for example `python -m mcp_gmail.server` which will open a browser to complete the authentication flow.  This will also create a token.json in your current folder.
 
 ## Usage
 
