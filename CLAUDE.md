@@ -15,12 +15,23 @@ A Python CLI tool that fetches newsletter emails from Gmail by label and summari
 
 ## Pipeline (agreed, not yet fully implemented)
 1. `list_available_labels` → fetch labels, user picks one via `prompt_toolkit` autocomplete
-2. User inputs a from_date
+2. User inputs date range and optional email cap (with defaults)
 3. `search_emails` (MCP tool) → returns email IDs + metadata, filtered by label and date
 4. Read tool (exact name TBC — check inspector, likely `get_email` or `read_message`) → called once per email ID to get body
 5. `clean_email()` — strip URLs, image references, normalise whitespace (~52% token reduction observed)
-6. Cap input at a token limit before sending to Claude
+6. Accumulate cleaned bodies, slice at hard token cap before sending to Claude
 7. Send to Claude Haiku for summarisation
+
+## User inputs and defaults
+- `label` — selected via `prompt_toolkit` autocomplete (no default)
+- `from_date` — default: today minus 7 days (format: YYYY/MM/DD for `search_emails`)
+- `to_date` — default: today
+- `max_emails` — default: 20, user can override
+
+## Hard caps (non-negotiable, not shown to user)
+- `max_results=20` passed to `search_emails` (or user value if lower)
+- Cleaned email content sliced at 400k chars (~100k tokens) before sending to Claude
+- No warning shown when cap is hit — silent truncation for now
 
 ## Token / cost notes
 - 3 sample emails = ~88k chars raw → ~41k chars cleaned (~22k → ~10k tokens, 52% reduction)
