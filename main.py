@@ -1,44 +1,16 @@
-import os
-from dotenv import load_dotenv
 from anthropic import Anthropic
 import asyncio
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
+from gmail_mcp_client import GmailMcpClient
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+import os
 from prompt_toolkit import prompt
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit import PromptSession
-from datetime import datetime, timedelta
 
 load_dotenv()
-
-async def fetch_labels(session):
-    result = await session.call_tool("list_available_labels", {})
-    # result.content is a list of content blocks, first one is the text
-    raw_text = result.content[0].text
-    # parse out the Name: lines
-    labels = []
-    for line in raw_text.splitlines():
-        if line.startswith("Name:"):
-            labels.append(line.replace("Name:", "").strip())
-    return labels
-
-async def search_emails(session, label, from_date, to_date, max_emails):
-    result = await session.call_tool("search_emails", {
-        "label":label,
-        "after_date": from_date,
-        "before_date": to_date,
-        "max_results": max_emails
-    })
-    raw_text = result.content[0].text
-    message_ids = []
-    for line in raw_text.splitlines():
-        if line.startswith("Message ID:"):
-            message_ids.append(line.replace("Message ID:", "").strip())
-    return message_ids
-
-async def get_emails(session, message_ids):
-    result = await session.call_tool("get_emails", {"message_ids":message_ids})
-    return result
 
 async def main():
     server_params = StdioServerParameters(
@@ -46,10 +18,8 @@ async def main():
         args=["run_gmail_mcp_server.py"]
     )
 
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            labels = await fetch_labels(session)
+    async with GmailMcpClient() as client:
+            labels = await client.fetch_labels()
             label_completer = WordCompleter(labels, ignore_case=True)
             session_pt = PromptSession()
             label = await session_pt.prompt_async("Enter Gmail label: ", completer=label_completer)
@@ -86,9 +56,9 @@ async def main():
                 exit()
 
 
-            email_ids = await search_emails(session, label, from_date, to_date, max_emails)
+            email_ids = await client.search_emails(label, from_date, to_date, max_emails)
             # print(emails_raw)  # verify the output before moving to the next step
-            emails_content = await get_emails(session, email_ids)
+            emails_content = await client.get_emails(email_ids)
             print(emails_content)
     
     """
