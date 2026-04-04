@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from gmail_mcp_client import GmailMcpClient
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from my_email import MyEmail
 import os
 from prompt_toolkit import prompt
 from prompt_toolkit.completion import WordCompleter
@@ -56,13 +57,18 @@ async def main():
             if consent != '':
                 exit()
 
-
             email_ids = await client.search_emails(label, from_date, to_date, max_emails)
-            # print(emails_raw)  # verify the output before moving to the next step
-            emails_content = await client.get_emails(email_ids)
-            with open('emails_dump.json', 'w') as f:
-                json.dump(emails_content.model_dump(), f, indent=2)
-    
+
+            #result = await client.list_tools()
+            #print([t.name for t in result.tools])
+
+            email_list = []
+            for id in email_ids:
+                email_data = await client.get_email_message(id)
+                email = MyEmail.from_mcp(id, email_data)
+                print(email.clean_body,"\n\n")
+                email_list.append(email)
+   
     """
     
     print(\"""

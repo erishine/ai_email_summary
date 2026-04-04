@@ -47,3 +47,11 @@ class GmailMcpClient:
     async def get_emails(self, message_ids):
         result = await self.session.call_tool("get_emails", {"message_ids":message_ids})
         return result
+    
+    async def get_email_message(self, message_id):
+        result = await self.session.read_resource(f"gmail://messages/{message_id}")
+        return result
+    
+    async def list_tools(self):
+        return await self.session.list_tools()
+
