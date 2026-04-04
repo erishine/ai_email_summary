@@ -3,4 +3,4 @@
 credentials.json
 token.json
 __pycache__
-dump*.json
+*.json

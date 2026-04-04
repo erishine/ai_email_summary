@@ -9,6 +9,7 @@ import os
 from prompt_toolkit import prompt
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit import PromptSession
+import json
 
 load_dotenv()
 
@@ -59,7 +60,8 @@ async def main():
             email_ids = await client.search_emails(label, from_date, to_date, max_emails)
             # print(emails_raw)  # verify the output before moving to the next step
             emails_content = await client.get_emails(email_ids)
-            print(emails_content)
+            with open('emails_dump.json', 'w') as f:
+                json.dump(emails_content.model_dump(), f, indent=2)
     
     """
     

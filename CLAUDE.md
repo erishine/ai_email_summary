@@ -24,15 +24,20 @@ Requires a `.env` file with `ANTHROPIC_API_KEY`. Gmail OAuth credentials are sto
 
 ## Architecture
 
-`main.py` is the entire application — one async `main()` function that opens an MCP `ClientSession` and keeps it open for all tool calls. `run_gmail_mcp_server.py` is a one-liner that starts the `mcp-gmail` server; it's launched as a subprocess by `main.py` via `StdioServerParameters`.
+- `main.py` — async `main()` orchestration, prompt loop, user inputs
+- `gmail_mcp_client.py` — `GmailMcpClient` class, used as `async with GmailMcpClient() as client:`. Manages the MCP session lifecycle via `__aenter__`/`__aexit__` and exposes `fetch_labels()`, `search_emails()`, `get_emails()`
+- `utils.py` — `Email` dataclass, `parse_emails()`, `clean_email()` (in progress)
+- `run_gmail_mcp_server.py` — one-liner that starts the `mcp-gmail` server; launched as a subprocess by `GmailMcpClient` via `StdioServerParameters`
 
 Flow inside `main()`:
-1. Open MCP session → call `list_available_labels` → `prompt_toolkit` autocomplete for label selection
+1. `GmailMcpClient` opens MCP session → `fetch_labels()` → `prompt_toolkit` autocomplete
 2. Prompt for date range and email cap (with defaults)
-3. Call `search_emails` → parse `Message ID:` lines from response text
-4. Call `get_emails` with the list of IDs → raw email content returned
+3. `search_emails()` → list of message IDs
+4. `get_emails()` → one big string with all emails, separated by `--- Email N (ID: ...) ---` headers
+5. `parse_emails()` → `list[Email]` (each with `id`, `subject`, `from_`, `date`, `raw_body`, `clean_body`)
+6. Accumulate `clean_body` fields, slice at 400k chars hard cap, send to Claude Haiku
 
-**Not yet implemented:** `clean_email()`, token-capping, and sending to Claude Haiku. The old Anthropic client code is still in `main.py` as a commented-out block at the bottom.
+**Not yet implemented:** `parse_emails()`, `clean_email()`, token-capping, Claude summarisation call.
 
 ## MCP tool names (as registered on the server)
 - `list_available_labels` — returns label list with `Name: <label>` lines
@@ -67,4 +72,6 @@ Flow inside `main()`:
 ## Key technical decisions
 - `asyncio` + MCP Python SDK (`mcp` v1.27.0) for Gmail calls — avoids routing through Anthropic
 - `PromptSession.prompt_async()` required (not `prompt()`) — running inside an async event loop
-- MCP session kept open for entire run; all tool calls reuse it
+- MCP session kept open for entire run via `GmailMcpClient` async context manager
+- `get_emails` returns a single `CallToolResult`; use `.content[0].text` for the full string, `.model_dump()` to serialise
+- `Email` dataclass (in `utils.py`) will include `message_id` to support future use cases like fetching a specific email's links after summarisation
