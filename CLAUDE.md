@@ -33,16 +33,19 @@ Flow inside `main()`:
 1. `GmailMcpClient` opens MCP session → `fetch_labels()` → `prompt_toolkit` autocomplete
 2. Prompt for date range and email cap (with defaults)
 3. `search_emails()` → list of message IDs
-4. `get_emails()` → one big string with all emails, separated by `--- Email N (ID: ...) ---` headers
-5. `parse_emails()` → `list[Email]` (each with `id`, `subject`, `from_`, `date`, `raw_body`, `clean_body`)
+4. `get_email_message()` called once per ID → structured single-email response, build one `Email` object per call (exact tool name TBC — check inspector)
+5. `clean_email()` on each `raw_body` → `clean_body`
 6. Accumulate `clean_body` fields, slice at 400k chars hard cap, send to Claude Haiku
 
-**Not yet implemented:** `parse_emails()`, `clean_email()`, token-capping, Claude summarisation call.
+**Why per-email calls over batch `get_emails`:** `get_emails` returns one concatenated string requiring fragile splitting. Per-email calls give structured output that maps directly to the `Email` dataclass. N local MCP calls is negligible overhead.
+
+**Not yet implemented:** per-email fetch, `clean_email()`, token-capping, Claude summarisation call.
 
 ## MCP tool names (as registered on the server)
 - `list_available_labels` — returns label list with `Name: <label>` lines
 - `search_emails` — params: `label`, `after_date`, `before_date`, `max_results` (YYYY/MM/DD format)
-- `get_emails` — params: `message_ids` (list)
+- `get_emails` — params: `message_ids` (list) — **no longer used**, replaced by per-email calls
+- `get_email_message` (exact name TBC) — called once per message ID, returns structured single-email response including `URI: gmail://messages/<id>` in the body (use to build `gmail_url`)
 
 ## Pipeline (agreed, partially implemented)
 1. `list_available_labels` → label picker
