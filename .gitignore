@@ -5,4 +5,4 @@ token.json
 __pycache__
 *.json
 *.txt
-summary.md
+*summary*.md
