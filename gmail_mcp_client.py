@@ -54,4 +54,9 @@ class GmailMcpClient:
     
     async def list_tools(self):
         return await self.session.list_tools()
-
+    
+    async def use_tool(self, tool_name, tool_input):
+        return await self.session.call_tool(tool_name, tool_input)
+    
+    async def list_resource_templates(self):
+        return await self.session.list_resource_templates()

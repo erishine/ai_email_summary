@@ -11,15 +11,11 @@ from prompt_toolkit import prompt
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit import PromptSession
 import json
+from email_summary_workflow import EmailSummaryWorkflow
 
 load_dotenv()
 
 async def main():
-    server_params = StdioServerParameters(
-        command=".venv/bin/python",
-        args=["run_gmail_mcp_server.py"]
-    )
-
     email_list = []
 
     async with GmailMcpClient() as client:
@@ -99,7 +95,28 @@ async def main():
     with open('summary.md', 'w') as f:
         f.write(summary)
 
+async def v2():
+    async with GmailMcpClient() as client:
+        # no worth having Claude to trigger this call
+        labels = await client.fetch_labels()
+        label_completer = WordCompleter(labels, ignore_case=True)
+        session_pt = PromptSession()
+        label = await session_pt.prompt_async("Select Gmail label: ", completer=label_completer)
+        print(f"We will summarise only emails with label '{label}'")
+        print(f"""
+        Now tell Claude which emails you want to summarise. For example:
+              `All the emails in the last 7 days`
+              `3 emails from last Friday`
+              `emails with "MCP" in the subject`
+              `Last 7 unread emails`
+        If date is not specified we will consider emails in the last 3 days.
+              """)
+        search_request=input(">")
+
+        workflow = EmailSummaryWorkflow(label, search_request, client)
+        await workflow.start()
+
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(v2())
