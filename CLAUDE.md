@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## What this project does
-A Python CLI tool that fetches emails from Gmail by label and summarises them using the Claude API (Haiku model). Built as a learning project exploring MCP and agentic AI patterns.
+A Python CLI tool that fetches emails from Gmail and summarises them using the Claude API (Haiku model). Built as a learning project exploring MCP and agentic AI patterns.
 
 ## Commands
 
@@ -30,18 +30,18 @@ Requires a `.env` file with `ANTHROPIC_API_KEY`. Gmail OAuth credentials are sto
 ## Architecture
 
 ### Files
-- `main.py` — entry points for both versions. `v2()` is the active one: collects label + freeform search request from the user, then hands off to `EmailSummaryWorkflow`. `main()` is the V1 flow (kept for reference).
-- `email_summary_workflow.py` — `EmailSummaryWorkflow` class (V2). Runs the agentic loop: sends all MCP tools to Claude Haiku, then iterates `messages.create` → call MCP tool → append result until `stop_reason != "tool_use"`. Saves final summary to `summary.md`.
-- `gmail_mcp_client.py` — `GmailMcpClient` async context manager. Wraps the MCP session lifecycle and exposes: `fetch_labels()`, `search_emails()`, `get_emails()`, `get_email_message()`, `list_tools()`, `use_tool()`.
-- `my_email.py` — `MyEmail` dataclass used in V1. `from_mcp()` parses MCP response; `_clean_body()` strips URLs/footers via regex (~52% token reduction).
+- `main.py` — entry point. `v2()` prompts for a freeform search request and hands off to `EmailSummaryWorkflow`.
+- `email_summary_workflow.py` — `EmailSummaryWorkflow` class. Runs the agentic loop: sends all MCP tools to Claude Haiku, handles `tool_use` (parallel) and `stop_sequence` (`[DONE]`/`[QUESTION]`) responses. `_prepare_messages_for_api()` strips `get_emails` bodies from history before each API call to reduce tokens. Saves final summary to `summary.md`.
+- `gmail_mcp_client.py` — `GmailMcpClient` async context manager. Wraps the MCP session lifecycle; exposes `list_tools()` and `use_tool()`. Also has `fetch_labels()` (parses `Name:` lines from `list_available_labels`) but it is not currently called.
 - `run_gmail_mcp_server.py` — one-liner that starts the `mcp-gmail` server as a subprocess (via `StdioServerParameters`).
 
 ### V2 agentic flow
-1. `GmailMcpClient` opens MCP session → `fetch_labels()` → `prompt_toolkit` autocomplete for label selection
-2. User types a freeform search request (e.g. "last 5 unread emails")
-3. `EmailSummaryWorkflow.start()` builds the system prompt (injects today's date, label, and request), fetches all available MCP tools via `list_tools()`, then enters the tool-use loop
-4. Loop: `messages.create` → if `stop_reason == "tool_use"`, call the MCP tool, append assistant + tool_result messages, repeat
-5. Final text response is printed and written to `summary.md`
+1. User types a freeform search request (e.g. "last 5 unread emails")
+2. `EmailSummaryWorkflow.start()` builds the system prompt (injects today's date and search request), fetches all MCP tools via `list_tools()`, enters the loop
+3. Loop: `_prepare_messages_for_api()` strips email bodies from history → `messages.create` with `stop_sequences=["[DONE]", "[QUESTION]"]`
+4. On `tool_use`: execute all tool_use blocks in parallel, append results tagged with `_tool_name` for later pruning, continue
+5. On `[QUESTION]` stop sequence: append assistant message, collect user input, continue
+6. On `[DONE]` stop sequence: break, write final response to `summary.md`
 
 ### MCP tool names (as registered on the server)
 Full list: `compose_email`, `send_email`, `search_emails`, `query_emails`, `list_available_labels`, `mark_message_read`, `add_label_to_message`, `remove_label_from_message`, `get_emails`
@@ -60,9 +60,10 @@ Resource templates (not tools, used in V1): accessible via `session.read_resourc
 
 ## Key technical decisions
 - `asyncio` + MCP Python SDK (`mcp` v1.27.0) for Gmail calls — avoids routing through Anthropic
-- `PromptSession.prompt_async()` required (not `prompt()`) — running inside an async event loop
 - MCP session kept open for entire run via `GmailMcpClient` async context manager
-- In V2, `EmailSummaryWorkflow` passes all MCP tools to Claude as-is (no filtering); Claude selects which to call
-- Tool result content accessed via `result.content[0].text`; email bodies must be cleared from the messages list before re-sending to Claude to reduce token usage (known TODO as of last commit)
+- All MCP tools passed to Claude as-is (no filtering); Claude selects which to call
+- Tool result content accessed via `result.content[0].text`
+- `_tool_name` is a private field tagged onto tool result dicts (not sent to API); `_prepare_messages_for_api()` uses it to identify and strip `get_emails` bodies before each API call
+- Stop sequences `[DONE]` and `[QUESTION]` are used instead of relying on `stop_reason == "end_turn"` — gives Claude a structured way to signal completion or request user input mid-run
 - Do NOT name any file `email.py` — shadows Python's built-in `email` module and breaks `mcp-gmail`
 - `gmail_url` constructed as `https://mail.google.com/mail/u/0/#inbox/{message_id}` from the message ID

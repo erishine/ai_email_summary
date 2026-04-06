@@ -9,7 +9,6 @@ class EmailSummaryWorkflow:
 
     
     def __init__(self, search_request, client):
-        #self.email_label = email_label
         self.user_search_request = search_request
         self.mcp_client = client
 
@@ -80,7 +79,7 @@ class EmailSummaryWorkflow:
             - format as Markdown
             - for each email:
                 - provide a header with format 
-                    Subject - (Sender)[https://mail.google.com/mail/u/0/#inbox/message_id]
+                    Subject - [Sender](https://mail.google.com/mail/u/0/#inbox/message_id)
                 - provide a summary of the topics with each topic as a bullet points
             - at the end summarise the main trends across the emails retrieved
             """
@@ -93,9 +92,6 @@ class EmailSummaryWorkflow:
         messages.append(user_message)
         
         mcp_tools = await self.mcp_client.list_tools()
-
-        #print(type(mcp_tools))
-        #print(mcp_tools)
 
         tools = [
             {
@@ -124,6 +120,7 @@ class EmailSummaryWorkflow:
                 if response.stop_sequence == "[DONE]":
                     break
                 if response.stop_sequence == "[QUESTION]":
+                    messages.append({"role": "assistant", "content": response.content}) 
                     user_input = input(">")
                     messages.append({"role": "user", "content": user_input})
                     continue
