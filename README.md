@@ -8,31 +8,23 @@ It's also a learning project — specifically an exploration of the Model Contex
 ## How it works
 
 1. Fetches your Gmail labels via the Gmail MCP server and prompts you to pick one using an autocomplete dropdown
-2. Prompts for a date range and optional email cap (with sensible defaults)
-3. Confirms the search criteria before proceeding
-4. Fetches matching emails, cleans the content (strips URLs, footers, boilerplate) to reduce token usage
-5. Sends the cleaned content to Claude Haiku for summarisation
-6. Prints the summary to the terminal and saves it to summary markdown file.
+2. Accepts a freeform natural language search request (e.g. *"last 5 unread emails"*, *"emails about MCP from last Friday"*)
+3. Hands the request to Claude Haiku, which drives the Gmail tool calls directly — searching and fetching emails autonomously
+4. Prints the summary to the terminal and saves it to `summary.md`
 
 ## Architecture
 
 The app has three main components:
 
-- **`gmail_mcp_client.py`** — async context manager wrapping the MCP `ClientSession`. Handles all Gmail tool calls (`list_available_labels`, `search_emails`, `get_emails`) and parses raw MCP responses
-- **`my_email.py`** — dataclass representing a single email. Handles parsing of MCP response text and cleaning of email body content via regex
-- **`main.py`** — orchestrates the full flow: label selection, date input, email fetching, prompt assembly, and Claude API call
+- **`gmail_mcp_client.py`** — async context manager wrapping the MCP `ClientSession`. Handles the MCP session lifecycle and exposes `fetch_labels()`, `list_tools()`, and `use_tool()` for direct tool dispatch
+- **`email_summary_workflow.py`** — drives the agentic loop: sends all available Gmail MCP tools to Claude Haiku, then iterates tool call → MCP execution → result append until Claude produces a final text summary
+- **`main.py`** — entry point. Handles label selection with autocomplete, collects the freeform search request, and starts the workflow
 
-This is a V1 implementation where the Python code drives the orchestration and Claude is used only for the final summarisation step. **A V2 refactor is planned to shift to a fully agentic architecture where Claude drives the tool calls directly.**
+This is a V2 implementation where Claude drives the Gmail tool calls directly via the Anthropic tools API. Python handles only the initial user input and session lifecycle.
 
 ## Cost
 
-Running costs are low and limited to Claude API usage (the Gmail MCP is free for personal use). Based on typical usage:
-
-- Email cleaning reduces token count by ~52% (raw content ~88k chars → ~41k chars cleaned)
-- ~10 emails/run ≈ ~50k input tokens ≈ **$0.04/run** with Claude Haiku 4.5
-- A hard cap of 400k characters (~100k tokens) is applied before sending the prompt to Claude
-
-You can keep costs predictable by setting a low `max_emails` value when prompted.
+Running costs are low and limited to Claude API usage (the Gmail MCP is free for personal use). A cap of 10 emails per run is enforced. Costs will vary with email length but are typically in the range of **$0.01–0.05/run** with Claude Haiku 4.5.
 
 ## Setup
 
@@ -134,19 +126,23 @@ python main.py
 You will be prompted for:
 
 - **Gmail label** — autocomplete dropdown populated from your account, e.g. `Data Science`
-- **Start date** — `YYYY/MM/DD` format, defaults to 7 days ago
-- **End date** — `YYYY/MM/DD` format, defaults to today
-- **Max emails** — defaults to 20
+- **Search request** — freeform natural language, e.g. `last 5 unread emails` or `emails about Python from this week`
 
-The tool will confirm your criteria before fetching. The summary is printed to the terminal and saved to `summary.md`.
+Claude will search and fetch the matching emails autonomously, then print a summary to the terminal and save it to `summary.md`.
 
 ## Known limitations
 
-- Email cleaning is regex-based and works well for newsletters but may miss edge cases in less structured emails
-- `main.py` currently handles orchestration, input, and the Claude call in a single function — a refactor is planned for V2
 - No retry logic if the Gmail MCP server or Claude API call fails
+- Email bodies are included in the full message history sent back to Claude on each tool loop iteration — this increases token usage for longer runs
 
 ## Roadmap
 
-- **V2:** Shift to a fully agentic architecture where Claude drives the Gmail tool calls, with natural language criteria input and a confirmation step before fetching
-- **V3:** Browser-based interface
+**V1** *(available on branch `version_1`)* — Python drove the full orchestration: label picker, structured date and email cap prompts, fetching and cleaning emails via regex (~52% token reduction), then a single Claude API call for summarisation. Claude was used only for the final step.
+
+**V2** *(current)* — fully agentic. Claude drives the Gmail tool calls directly using the Anthropic tools API. The user provides a freeform natural language search request; Claude decides which tools to call and in what order.
+
+**Future improvements:**
+- Prompt engineering to make summary output more consistent and structured
+- Ability to email the summary directly and make the search interaction more conversational
+- Token optimisation — clear email bodies from the message history before re-sending to Claude to reduce cost
+- A better UI (web or desktop) to replace the terminal prompt
