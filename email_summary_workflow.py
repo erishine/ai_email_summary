@@ -30,7 +30,7 @@ class EmailSummaryWorkflow:
             You are an email summarisation assistant. Your only task is to fetch and summarise emails from Gmail using the available tools.
             You will be given a Gmail label and a search criteria from the user. Use the Gmail tools to fetch the emails matching those criteria and summarise them.
             Today's date is {today}. If no date range is specified, you must default to only search emails received in the last 3 days.
-            Cap the total number of emails to summarise to 5.
+            Regardless of how many emails are found, you must cap the total number of emails to summarise to a maximum of 10.
             If the user asks anything unrelated to fetching and summarising emails, respond with a plain text message explaining you can only help with email summarisation and do not call any tools.
             
             <gmail_label>
@@ -74,12 +74,12 @@ class EmailSummaryWorkflow:
                 model="claude-haiku-4-5-20251001",
             )
 
-            print(message.content[0].text)
-
-        
             if message.stop_reason != "tool_use":
                 break
-        
+
+            if message.content[0].type == "text":
+                print(message.content[0].text)
+
             tool_name, tool_input, tool_use_id= self.tool_data(message)
 
             result = await self.mcp_client.use_tool(tool_name, tool_input)

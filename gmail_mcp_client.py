@@ -1,6 +1,7 @@
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+
 class GmailMcpClient:
     
     async def __aenter__(self):
@@ -30,33 +31,9 @@ class GmailMcpClient:
                 labels.append(line.replace("Name:", "").strip())
         return labels
 
-    async def search_emails(self, label, from_date, to_date, max_emails):
-        result = await self.session.call_tool("search_emails", {
-            "label":label,
-            "after_date": from_date,
-            "before_date": to_date,
-            "max_results": max_emails
-        })
-        raw_text = result.content[0].text
-        message_ids = []
-        for line in raw_text.splitlines():
-            if line.startswith("Message ID:"):
-                message_ids.append(line.replace("Message ID:", "").strip())
-        return message_ids
-
-    async def get_emails(self, message_ids):
-        result = await self.session.call_tool("get_emails", {"message_ids":message_ids})
-        return result
-    
-    async def get_email_message(self, message_id):
-        result = await self.session.read_resource(f"gmail://messages/{message_id}")
-        return result
-    
     async def list_tools(self):
         return await self.session.list_tools()
     
     async def use_tool(self, tool_name, tool_input):
         return await self.session.call_tool(tool_name, tool_input)
     
-    async def list_resource_templates(self):
-        return await self.session.list_resource_templates()
