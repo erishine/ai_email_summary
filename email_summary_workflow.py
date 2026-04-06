@@ -8,8 +8,7 @@ load_dotenv()
 class EmailSummaryWorkflow:
 
     
-    def __init__(self, email_label, search_request, client):
-        self.email_label = email_label
+    def __init__(self, search_request, client):
         self.user_search_request = search_request
         self.mcp_client = client
 
@@ -18,29 +17,72 @@ class EmailSummaryWorkflow:
         )
         self.antropic_client = client
 
-    def tool_data(self, claude_response):
-        for block in claude_response.content:
-            if block.type == "tool_use":
-                return block.name, block.input, block.id
+    def _prepare_messages_for_api(self, messages):
+        cleaned = []
+        for message in messages:
+            if message["role"] == "user" and isinstance(message["content"], list):
+                cleaned_blocks = []
+                for block in message["content"]:
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        clean_block = {
+                            "type": "tool_result",
+                            "tool_use_id": block["tool_use_id"],
+                            "content": (
+                                "[email bodies removed from history]"
+                                if block.get("_tool_name") == "get_emails"
+                                else block["content"]
+                            )
+                        }
+                        cleaned_blocks.append(clean_block)
+                    else:
+                        cleaned_blocks.append(block)
+                cleaned.append({**message, "content": cleaned_blocks})
+            else:
+                cleaned.append(message)
+        return cleaned
 
     async def start(self):
         messages = []
         today = datetime.today().strftime("%Y/%m/%d")
-        first_message=f"""
+        first_message = f"""
             You are an email summarisation assistant. Your only task is to fetch and summarise emails from Gmail using the available tools.
-            You will be given a Gmail label and a search criteria from the user. Use the Gmail tools to fetch the emails matching those criteria and summarise them.
-            Today's date is {today}. If no date range is specified, you must default to only search emails received in the last 3 days.
-            Regardless of how many emails are found, you must cap the total number of emails to summarise to a maximum of 10.
-            If the user asks anything unrelated to fetching and summarising emails, respond with a plain text message explaining you can only help with email summarisation and do not call any tools.
-            
-            <gmail_label>
-            {self.email_label}
-            </gmail_label>
 
-            <user_search_crieria>
+            Today's date is {today}.
+
+            ## Rules
+
+            1. Use the Gmail tools to fetch emails matching the user's search request and summarise them.
+            2. If no date range is specified, default to emails received in the last 3 days.
+            3. Cap the total number of emails to summarise to a maximum of 10.
+            4. If the user asks anything unrelated to fetching and summarising emails, explain you can only help with email summarisation and do not call any tools.
+            5. When searching for emails received on a specific day, set after_date to that day and before_date to the following day.
+            
+            ## Mandatory output rules — follow these without exception
+
+            - Any time you want to ask the user something or need their input — including confirmations, clarifications, or corrections — you MUST output [QUESTION] immediately after your question. No exceptions.
+            - You MUST NOT end a turn with a question unless you have output [QUESTION] first.
+            - Once you have delivered the final summary and have no further questions, you MUST output [DONE] on its own line. Do not output [DONE] at any other point.
+
+            ## Workflow
+
+            1. Search for emails matching the user's request using the available tools.
+            2. After identifying the matching emails, always summarise what you found and confirm with the user how to proceed before doing anything further. Output [QUESTION] after this confirmation request.
+            3. Once confirmed, fetch the emails and produce the summary.
+            4. Output [DONE] after the summary.
+
+
+            <search_request>
             {self.user_search_request}
-            </user_search_crieria>
-        """
+            </search_request>
+
+            ## Email summary result
+            - format as Markdown
+            - for each email:
+                - provide a header with format 
+                    Subject - [Sender](https://mail.google.com/mail/u/0/#inbox/message_id)
+                - provide a summary of the topics with each topic as a bullet points
+            - at the end summarise the main trends across the emails retrieved
+            """
 
         user_message = {
             "role":"user",
@@ -48,11 +90,8 @@ class EmailSummaryWorkflow:
         }
 
         messages.append(user_message)
-
+        
         mcp_tools = await self.mcp_client.list_tools()
-
-        #print(type(mcp_tools))
-        #print(mcp_tools)
 
         tools = [
             {
@@ -63,44 +102,49 @@ class EmailSummaryWorkflow:
             for tool in mcp_tools.tools
         ]
 
-        message = None
+        response = None
 
         while True:
-
-            message = self.antropic_client.messages.create(
+            response = self.antropic_client.messages.create(
                 max_tokens=4096,
-                messages=messages,
+                messages=self._prepare_messages_for_api(messages),
                 tools = tools,
+                stop_sequences=["[DONE]", "[QUESTION]"],
                 model="claude-haiku-4-5-20251001",
             )
 
-            if message.stop_reason != "tool_use":
+            if response.content[0].type == "text":
+                print(response.content[0].text)
+
+            if response.stop_reason == "stop_sequence":
+                if response.stop_sequence == "[DONE]":
+                    break
+                if response.stop_sequence == "[QUESTION]":
+                    messages.append({"role": "assistant", "content": response.content}) 
+                    user_input = input(">")
+                    messages.append({"role": "user", "content": user_input})
+                    continue
+            elif response.stop_reason == "tool_use":
+                tool_use_blocks = [block for block in response.content if block.type == "tool_use"]
+
+                tool_results = []
+                for block in tool_use_blocks:
+                    result = await self.mcp_client.use_tool(block.name, block.input)
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result.content[0].text,
+                        "_tool_name": block.name  # private tag for pruning
+                    })
+
+                messages.append({"role": "assistant", "content": response.content})
+                messages.append({"role": "user", "content": tool_results})
+                continue
+            else:
                 break
 
-            if message.content[0].type == "text":
-                print(message.content[0].text)
-
-            tool_name, tool_input, tool_use_id= self.tool_data(message)
-
-            result = await self.mcp_client.use_tool(tool_name, tool_input)
-
-            messages.append({"role": "assistant", "content": message.content})
-
-            messages.append({
-                "role":"user",
-                "content": [
-                    {
-                        "type":"tool_result",
-                        "tool_use_id":tool_use_id,
-                        "content":result.content[0].text
-                    }
-                ]
-            })
-
-        if message:
-            print(message.content[0].text)
-
-        with open('summary.md', 'w') as f:
-            f.write(message.content[0].text)
+        if response:
+            with open('summary.md', 'w') as f:
+                f.write(response.content[0].text)
 
 

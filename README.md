@@ -7,18 +7,17 @@ It's also a learning project — specifically an exploration of the Model Contex
 
 ## How it works
 
-1. Fetches your Gmail labels via the Gmail MCP server and prompts you to pick one using an autocomplete dropdown
-2. Accepts a freeform natural language search request (e.g. *"last 5 unread emails"*, *"emails about MCP from last Friday"*)
-3. Hands the request to Claude Haiku, which drives the Gmail tool calls directly — searching and fetching emails autonomously
-4. Prints the summary to the terminal and saves it to `summary.md`
+1. Accepts a freeform natural language search request (e.g. *"last 5 unread emails"*, *"emails about MCP from last Friday"*)
+2. Hands the request to Claude Haiku, which drives the Gmail tool calls directly — searching for matching emails and confirming with you before fetching
+3. Prints the summary to the terminal and saves it to `summary.md`
 
 ## Architecture
 
 The app has three main components:
 
-- **`gmail_mcp_client.py`** — async context manager wrapping the MCP `ClientSession`. Handles the MCP session lifecycle and exposes `fetch_labels()`, `list_tools()`, and `use_tool()` for direct tool dispatch
-- **`email_summary_workflow.py`** — drives the agentic loop: sends all available Gmail MCP tools to Claude Haiku, then iterates tool call → MCP execution → result append until Claude produces a final text summary
-- **`main.py`** — entry point. Handles label selection with autocomplete, collects the freeform search request, and starts the workflow
+- **`gmail_mcp_client.py`** — async context manager wrapping the MCP `ClientSession`. Handles the MCP session lifecycle and exposes `list_tools()` and `use_tool()` for direct tool dispatch
+- **`email_summary_workflow.py`** — drives the agentic loop: sends all available Gmail MCP tools to Claude Haiku, handles tool calls, and uses stop sequences (`[DONE]`, `[QUESTION]`) to manage completion and mid-run user confirmations
+- **`main.py`** — entry point. Collects the freeform search request and starts the workflow
 
 This is a V2 implementation where Claude drives the Gmail tool calls directly via the Anthropic tools API. Python handles only the initial user input and session lifecycle.
 
@@ -125,15 +124,13 @@ python main.py
 
 You will be prompted for:
 
-- **Gmail label** — autocomplete dropdown populated from your account, e.g. `Data Science`
 - **Search request** — freeform natural language, e.g. `last 5 unread emails` or `emails about Python from this week`
 
-Claude will search and fetch the matching emails autonomously, then print a summary to the terminal and save it to `summary.md`.
+Claude will search for matching emails, confirm with you before fetching, then print a summary to the terminal and save it to `summary.md`.
 
 ## Known limitations
 
 - No retry logic if the Gmail MCP server or Claude API call fails
-- Email bodies are included in the full message history sent back to Claude on each tool loop iteration — this increases token usage for longer runs
 
 ## Roadmap
 
@@ -144,5 +141,4 @@ Claude will search and fetch the matching emails autonomously, then print a summ
 **Future improvements:**
 - Prompt engineering to make summary output more consistent and structured
 - Ability to email the summary directly and make the search interaction more conversational
-- Token optimisation — clear email bodies from the message history before re-sending to Claude to reduce cost
 - A better UI (web or desktop) to replace the terminal prompt
