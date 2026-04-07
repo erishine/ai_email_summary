@@ -139,6 +139,7 @@ Claude will search for matching emails, confirm with you before fetching, then p
 **V2** *(current)* — fully agentic. Claude drives the Gmail tool calls directly using the Anthropic tools API. The user provides a freeform natural language search request; Claude decides which tools to call and in what order.
 
 **Future improvements:**
-- Prompt engineering to make summary output more consistent and structured
+- Prompt engineering and evaluation to make summary output more consistent and structured
 - Ability to email the summary directly and make the search interaction more conversational
+- Enable citations with TinyURLs so email links in the summary are shorter and more readable
 - A better UI (web or desktop) to replace the terminal prompt
