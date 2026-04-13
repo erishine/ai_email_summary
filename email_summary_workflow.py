@@ -53,7 +53,7 @@ class EmailSummaryWorkflow:
 
             1. Use the Gmail tools to fetch emails matching the user's search request and summarise them.
             2. If no date range is specified, default to emails received in the last 3 days.
-            3. Cap the total number of emails to summarise to a maximum of 10.
+            3. Cap the total number of emails to summarise to a maximum of 20.
             4. If the user asks anything unrelated to fetching and summarising emails, explain you can only help with email summarisation and do not call any tools.
             5. When searching for emails received on a specific day, set after_date to that day and before_date to the following day.
             
@@ -76,12 +76,17 @@ class EmailSummaryWorkflow:
             </search_request>
 
             ## Email summary result
-            - format as Markdown
-            - for each email:
-                - provide a header with format 
-                    Subject - [Sender](https://mail.google.com/mail/u/0/#inbox/message_id)
-                - provide a summary of the topics with each topic as a bullet points
-            - at the end summarise the main trends across the emails retrieved
+            - Format as Markdown
+            - For each email, follow this exact process:
+            - For each email:
+                1. Copy the exact section headings or titles as they appear in the email body 
+                   (e.g. "MCP", "PYTHON", "DEEP DIVE" — use the actual words, not paraphrases)
+                2. Write one bullet per heading
+                3. If you cannot find a literal heading, note "no section headings" and summarise 
+       paragraphs as separate bullets instead
+            - Header format: Subject - [Sender](https://mail.google.com/mail/u/0/#inbox/message_id)
+            - Do NOT derive topics from the subject line — derive them from the body sections
+            - At the end, summarise the main trends across all retrieved emails
             """
 
         user_message = {
@@ -106,7 +111,7 @@ class EmailSummaryWorkflow:
 
         while True:
             response = self.antropic_client.messages.create(
-                max_tokens=4096,
+                max_tokens=8096,
                 messages=self._prepare_messages_for_api(messages),
                 tools = tools,
                 stop_sequences=["[DONE]", "[QUESTION]"],
@@ -144,7 +149,9 @@ class EmailSummaryWorkflow:
                 break
 
         if response:
-            with open('summary.md', 'w') as f:
-                f.write(response.content[0].text)
-
-
+            # Find the last text block
+            text_blocks = [b for b in response.content if hasattr(b, 'text')]
+            if text_blocks:
+                date_time = datetime.today().strftime('%Y%m%d_%H%M%S')
+                with open(f"summary_{date_time}.md", 'w') as file:
+                    file.write(text_blocks[-1].text)
