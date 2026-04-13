@@ -126,7 +126,7 @@ You will be prompted for:
 
 - **Search request** — freeform natural language, e.g. `last 5 unread emails` or `emails about Python from this week`
 
-Claude will search for matching emails, confirm with you before fetching, then print a summary to the terminal and save it to `summary.md`.
+Claude will search for matching emails, confirm with you before fetching, then print a summary to the terminal and save it to a timestamped file (`summary_YYYYMMDD_HHMMSS.md`).
 
 ## Known limitations
 

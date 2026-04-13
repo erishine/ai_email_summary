@@ -31,7 +31,7 @@ Requires a `.env` file with `ANTHROPIC_API_KEY`. Gmail OAuth credentials are sto
 
 ### Files
 - `main.py` — entry point. `v2()` prompts for a freeform search request and hands off to `EmailSummaryWorkflow`.
-- `email_summary_workflow.py` — `EmailSummaryWorkflow` class. Runs the agentic loop: sends all MCP tools to Claude Haiku, handles `tool_use` (parallel) and `stop_sequence` (`[DONE]`/`[QUESTION]`) responses. `_prepare_messages_for_api()` strips `get_emails` bodies from history before each API call to reduce tokens. Saves final summary to `summary.md`.
+- `email_summary_workflow.py` — `EmailSummaryWorkflow` class. Runs the agentic loop: sends all MCP tools to Claude Haiku, handles `tool_use` (parallel) and `stop_sequence` (`[DONE]`/`[QUESTION]`) responses. `_prepare_messages_for_api()` strips `get_emails` bodies from all but the most recent tool result in history (the last one is preserved for summarisation). Saves final summary to a timestamped file (`summary_YYYYMMDD_HHMMSS.md`).
 - `gmail_mcp_client.py` — `GmailMcpClient` async context manager. Wraps the MCP session lifecycle; exposes `list_tools()` and `use_tool()`. Also has `fetch_labels()` (parses `Name:` lines from `list_available_labels`) but it is not currently called.
 - `run_gmail_mcp_server.py` — one-liner that starts the `mcp-gmail` server as a subprocess (via `StdioServerParameters`).
 
@@ -63,7 +63,7 @@ Resource templates (not tools, used in V1): accessible via `session.read_resourc
 - MCP session kept open for entire run via `GmailMcpClient` async context manager
 - All MCP tools passed to Claude as-is (no filtering); Claude selects which to call
 - Tool result content accessed via `result.content[0].text`
-- `_tool_name` is a private field tagged onto tool result dicts (not sent to API); `_prepare_messages_for_api()` uses it to identify and strip `get_emails` bodies before each API call
+- `_tool_name` is a private field tagged onto tool result dicts (not sent to API); `_prepare_messages_for_api()` uses it to identify and strip `get_emails` bodies from history — all except the most recent message, which is kept intact so Claude can summarise the email content
 - Stop sequences `[DONE]` and `[QUESTION]` are used instead of relying on `stop_reason == "end_turn"` — gives Claude a structured way to signal completion or request user input mid-run
 - Do NOT name any file `email.py` — shadows Python's built-in `email` module and breaks `mcp-gmail`
 - `gmail_url` constructed as `https://mail.google.com/mail/u/0/#inbox/{message_id}` from the message ID

@@ -19,7 +19,8 @@ class EmailSummaryWorkflow:
 
     def _prepare_messages_for_api(self, messages):
         cleaned = []
-        for message in messages:
+        for i, message in enumerate(messages):
+            is_last = (i == len(messages) - 1)
             if message["role"] == "user" and isinstance(message["content"], list):
                 cleaned_blocks = []
                 for block in message["content"]:
@@ -28,11 +29,16 @@ class EmailSummaryWorkflow:
                             "type": "tool_result",
                             "tool_use_id": block["tool_use_id"],
                             "content": (
-                                "[email bodies removed from history]"
-                                if block.get("_tool_name") == "get_emails"
-                                else block["content"]
+                                block["content"]  # keep full body
+                                if is_last
+                                else (
+                                    "[email bodies removed from history]"
+                                    if block.get("_tool_name") == "get_emails"
+                                    else block["content"]
+                                )
                             )
                         }
+                        # never pass _tool_name to the API
                         cleaned_blocks.append(clean_block)
                     else:
                         cleaned_blocks.append(block)
