@@ -1,6 +1,7 @@
 from anthropic import Anthropic
 from datetime import datetime
 from dotenv import load_dotenv
+from headroom import compress
 import os
 
 load_dotenv()
@@ -116,9 +117,15 @@ class EmailSummaryWorkflow:
         response = None
 
         while True:
+            result = compress(messages, model="claude-haiku-4-5-20251001")
+
+            print(f"----\nSaved {result.tokens_saved} tokens ({result.compression_ratio:.0%})\n-----")
+            
+            #messages=self._prepare_messages_for_api(result.messages),
+
             response = self.antropic_client.messages.create(
                 max_tokens=8096,
-                messages=self._prepare_messages_for_api(messages),
+                messages=self._prepare_messages_for_api(result.messages),
                 tools = tools,
                 stop_sequences=["[DONE]", "[QUESTION]"],
                 model="claude-haiku-4-5-20251001",
