@@ -1,54 +1,144 @@
-from anthropic import Anthropic
+from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langgraph.graph import StateGraph, END, START
+from langgraph.graph.message import add_messages
+from typing import Annotated, TypedDict
 from datetime import datetime
 from dotenv import load_dotenv
 import os
 
 load_dotenv()
 
-class EmailSummaryWorkflow:
+class MessagesState(TypedDict):
+    messages: Annotated[list, add_messages]
 
-    
+class EmailSummaryWorkflow:
     def __init__(self, search_request, client):
         self.user_search_request = search_request
         self.mcp_client = client
 
-        client = Anthropic(
-            api_key=os.getenv('ANTHROPIC_API_KEY')
+        # Initialize the LangChain LLM
+        self.llm = ChatAnthropic(
+            model="claude-haiku-4-5-20251001",
+            api_key=os.getenv('ANTHROPIC_API_KEY'),
+            max_tokens=8096,
+            stop_sequences=["[DONE]", "[QUESTION]"]
         )
-        self.antropic_client = client
 
     def _prepare_messages_for_api(self, messages):
+        """
+        Prunes the content of older get_emails tool calls to save context window.
+        """
         cleaned = []
         for i, message in enumerate(messages):
             is_last = (i == len(messages) - 1)
-            if message["role"] == "user" and isinstance(message["content"], list):
-                cleaned_blocks = []
-                for block in message["content"]:
-                    if isinstance(block, dict) and block.get("type") == "tool_result":
-                        clean_block = {
-                            "type": "tool_result",
-                            "tool_use_id": block["tool_use_id"],
-                            "content": (
-                                block["content"]  # keep full body
-                                if is_last
-                                else (
-                                    "[email bodies removed from history]"
-                                    if block.get("_tool_name") == "get_emails"
-                                    else block["content"]
-                                )
-                            )
-                        }
-                        # never pass _tool_name to the API
-                        cleaned_blocks.append(clean_block)
-                    else:
-                        cleaned_blocks.append(block)
-                cleaned.append({**message, "content": cleaned_blocks})
+            
+            if isinstance(message, ToolMessage):
+                if message.name == "get_emails" and not is_last:
+                    cleaned.append(ToolMessage(
+                        content="[email bodies removed from history]",
+                        tool_call_id=message.tool_call_id,
+                        name=message.name,
+                        id=message.id 
+                    ))
+                else:
+                    cleaned.append(message)
             else:
                 cleaned.append(message)
+                
         return cleaned
 
+    async def agent_node(self, state: MessagesState):
+        messages = state["messages"]
+        pruned_messages = self._prepare_messages_for_api(messages)
+        
+        response = await self.llm_with_tools.ainvoke(pruned_messages)
+        return {"messages": [response]}
+
+    async def tools_node(self, state: MessagesState):
+        last_message = state["messages"][-1]
+        tool_results = []
+        
+        for tool_call in last_message.tool_calls:
+            result = await self.mcp_client.use_tool(tool_call["name"], tool_call["args"])
+            tool_content = result.content[0].text if result.content else ""
+            
+            tool_results.append(ToolMessage(
+                content=tool_content,
+                tool_call_id=tool_call["id"],
+                name=tool_call["name"]
+            ))
+            
+        return {"messages": tool_results}
+
+    def human_node(self, state: MessagesState):
+        last_message = state["messages"][-1]
+        
+        if isinstance(last_message.content, list):
+            for block in last_message.content:
+                if block.get("type") == "text":
+                    print(block["text"])
+        elif isinstance(last_message.content, str):
+            print(last_message.content)
+            
+        user_input = input(">")
+        return {"messages": [HumanMessage(content=user_input)]}
+
+    def should_continue(self, state: MessagesState):
+        last_message = state["messages"][-1]
+        
+        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+            return "tools"
+            
+        stop_reason = last_message.response_metadata.get("stop_reason")
+        stop_sequence = last_message.response_metadata.get("stop_sequence")
+        
+        if stop_reason == "stop_sequence":
+            if stop_sequence == "[DONE]":
+                return END
+            if stop_sequence == "[QUESTION]":
+                return "human"
+                
+        content = ""
+        if isinstance(last_message.content, list):
+             for block in last_message.content:
+                 if block.get("type") == "text":
+                     content += block["text"]
+        else:
+             content = str(last_message.content)
+             
+        if "[DONE]" in content:
+            return END
+        if "[QUESTION]" in content:
+            return "human"
+            
+        return END
+
     async def start(self):
-        messages = []
+        mcp_tools_res = await self.mcp_client.list_tools()
+        lc_tools = []
+        for t in mcp_tools_res.tools:
+            lc_tools.append({
+                "name": t.name,
+                "description": t.description,
+                "input_schema": t.inputSchema
+            })
+            
+        self.llm_with_tools = self.llm.bind_tools(lc_tools)
+
+        workflow = StateGraph(MessagesState)
+        
+        workflow.add_node("agent", self.agent_node)
+        workflow.add_node("tools", self.tools_node)
+        workflow.add_node("human", self.human_node)
+        
+        workflow.add_edge(START, "agent")
+        workflow.add_conditional_edges("agent", self.should_continue)
+        workflow.add_edge("tools", "agent")
+        workflow.add_edge("human", "agent")
+        
+        self.app = workflow.compile()
+
         today = datetime.today().strftime("%Y/%m/%d")
         first_message = f"""
             You are an email summarisation assistant. Your only task is to fetch and summarise emails from Gmail using the available tools.
@@ -95,69 +185,25 @@ class EmailSummaryWorkflow:
             - At the end, summarise the main trends across all retrieved emails
             """
 
-        user_message = {
-            "role":"user",
-            "content":first_message
-        }
-
-        messages.append(user_message)
+        initial_state = {"messages": [HumanMessage(content=first_message)]}
         
-        mcp_tools = await self.mcp_client.list_tools()
-
-        tools = [
-            {
-                "name": tool.name,
-                "description": tool.description,
-                "input_schema": tool.inputSchema
-            }
-            for tool in mcp_tools.tools
-        ]
-
-        response = None
-
-        while True:
-            response = self.antropic_client.messages.create(
-                max_tokens=8096,
-                messages=self._prepare_messages_for_api(messages),
-                tools = tools,
-                stop_sequences=["[DONE]", "[QUESTION]"],
-                model="claude-haiku-4-5-20251001",
-            )
-
-            if response.content[0].type == "text":
-                print(response.content[0].text)
-
-            if response.stop_reason == "stop_sequence":
-                if response.stop_sequence == "[DONE]":
-                    break
-                if response.stop_sequence == "[QUESTION]":
-                    messages.append({"role": "assistant", "content": response.content}) 
-                    user_input = input(">")
-                    messages.append({"role": "user", "content": user_input})
-                    continue
-            elif response.stop_reason == "tool_use":
-                tool_use_blocks = [block for block in response.content if block.type == "tool_use"]
-
-                tool_results = []
-                for block in tool_use_blocks:
-                    result = await self.mcp_client.use_tool(block.name, block.input)
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": result.content[0].text,
-                        "_tool_name": block.name  # private tag for pruning
-                    })
-
-                messages.append({"role": "assistant", "content": response.content})
-                messages.append({"role": "user", "content": tool_results})
-                continue
-            else:
+        final_state = await self.app.ainvoke(initial_state)
+        
+        last_ai_msg = None
+        for msg in reversed(final_state["messages"]):
+            if isinstance(msg, AIMessage):
+                last_ai_msg = msg
                 break
-
-        if response:
-            # Find the last text block
-            text_blocks = [b for b in response.content if hasattr(b, 'text')]
-            if text_blocks:
-                date_time = datetime.today().strftime('%Y%m%d_%H%M%S')
-                with open(f"summary_{date_time}.md", 'w') as file:
-                    file.write(text_blocks[-1].text)
+                
+        if last_ai_msg:
+            content = ""
+            if isinstance(last_ai_msg.content, list):
+                for block in last_ai_msg.content:
+                    if block.get("type") == "text":
+                        content += block["text"]
+            else:
+                content = str(last_ai_msg.content)
+                
+            date_time = datetime.today().strftime('%Y%m%d_%H%M%S')
+            with open(f"summary_{date_time}.md", 'w') as file:
+                file.write(content)
